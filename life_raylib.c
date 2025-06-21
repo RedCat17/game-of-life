@@ -1,11 +1,11 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <termios.h>
 #include <fcntl.h>
 #include <time.h>
 #include "raylib.h"
+#include "raymath.h"
+
 
 #define WIDTH 800
 #define HEIGHT 600
@@ -104,7 +104,7 @@ void draw_world(World *world, Camera2D camera) {
     }
 }
 
-int get_neighbors(int x, int y, char type, World *world) {
+int count_neighbors(int x, int y, char type, World *world) {
     int count = 0;
     for (int i = y-1; i<=y+1; i++) {
         for (int j = x-1; j<=x+1; j++) {
@@ -119,19 +119,24 @@ int get_neighbors(int x, int y, char type, World *world) {
     return count;
 }
 
+void wrap_edges(World* world) {
+    int w = world->width;
+    int h = world->height;
+    for (int x = 1; x < w - 1; x++) {
+        world->current_world[x] = world->current_world[(h - 2) * w + x];
+        world->current_world[(h - 1) * w + x] = world->current_world[1 * w + x];
+    }
+    for (int y = 0; y < h; y++) {
+        world->current_world[y * w] = world->current_world[y * w + w - 2];
+        world->current_world[y * w + w - 1] = world->current_world[y * w + 1];
+    }
+}
+
 void step_world(World *world) {
-    for (int x = 1; x < world->width; x++) {
-        world->current_world[x] = world->current_world[(world->height - 2) * world->width + x];
-        world->current_world[(world->height - 1) * world->width + x] = world->current_world[world->width + x];
-    }
-    for (int y = 0; y < world->height; y++) {
-        world->current_world[y * world->width] = world->current_world[y * world->width + world->width - 2];
-        world->current_world[y * world->width + world->width - 1] = world->current_world[y * world->width + 1];
-    }
-    int count;
+    wrap_edges(world);
     for (int i = 1; i < world->width - 1; i++) {
         for (int j = 1; j < world->height - 1; j++) {
-            count = get_neighbors(j, i, 1, world);
+            int count = count_neighbors(j, i, 1, world);
             if ((world->current_world[i * world->width + j] == 1 && (count == 2 || count == 3)) || (world->current_world[i * world->width + j] == 0 && (count == 3))) {
                 world->next_world[i * world->width + j] = 1;
             } else {
@@ -175,6 +180,10 @@ int main() {
     camera.rotation = 0.0f;                      // No rotation
     camera.zoom = 1.0f;                          // Normal zoom
 
+    bool dragging = false;
+    Vector2 lastMousePosition = {0};
+
+
     int size = 1024;
 
     size += 2;
@@ -188,14 +197,34 @@ int main() {
     while (!WindowShouldClose()) {
         step_simulation(&sim);
 
-        if (IsKeyDown(KEY_RIGHT)) camera.target.x += 10.0f / camera.zoom;
-        if (IsKeyDown(KEY_LEFT))  camera.target.x -= 10.0f / camera.zoom;
-        if (IsKeyDown(KEY_DOWN))  camera.target.y += 10.0f / camera.zoom;
-        if (IsKeyDown(KEY_UP))    camera.target.y -= 10.0f / camera.zoom;
+        if (IsKeyDown(KEY_D)) camera.target.x += 10.0f / camera.zoom;
+        if (IsKeyDown(KEY_A))  camera.target.x -= 10.0f / camera.zoom;
+        if (IsKeyDown(KEY_S))  camera.target.y += 10.0f / camera.zoom;
+        if (IsKeyDown(KEY_W))    camera.target.y -= 10.0f / camera.zoom;
 
-        if (IsKeyDown(KEY_Q)) camera.zoom *= 1.05f;
-        if (IsKeyDown(KEY_E)) camera.zoom /= 1.05f;
-        if (camera.zoom < 0.1f) camera.zoom = 0.1f; // Prevent inverting
+        if (GetMouseWheelMove() == 1) camera.zoom *= 1.1f;
+        if (GetMouseWheelMove() == -1) camera.zoom /= 1.1f;
+        if (camera.zoom < 0.1f) camera.zoom = 0.1f;
+
+        // Start drag
+        if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE)) {
+            dragging = true;
+            lastMousePosition = GetMousePosition();
+        }
+
+        // End drag
+        if (IsMouseButtonReleased(MOUSE_BUTTON_MIDDLE)) {
+            dragging = false;
+        }
+
+        // Handle dragging
+        if (dragging) {
+            Vector2 currentMouse = GetMousePosition();
+            Vector2 delta = Vector2Subtract(lastMousePosition, currentMouse);
+            delta = Vector2Scale(delta, 1.0f / camera.zoom);
+            camera.target = Vector2Add(camera.target, delta);
+            lastMousePosition = currentMouse;
+        }
 
         BeginDrawing();
         BeginMode2D(camera); 
@@ -204,6 +233,7 @@ int main() {
         sprintf(text_buffer, "FPS: %d", GetFPS());
         DrawText(text_buffer, 10, 10, 20, BLACK);
         EndDrawing();
+
     }
 
     CloseWindow();

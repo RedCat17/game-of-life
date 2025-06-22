@@ -24,12 +24,14 @@ const Color COLORS[] = {
 int state = 0; // 0 - menu, 1 - sim
 
 typedef struct {
-    int width, height;
-    int generation;
+    unsigned int width, height;
+    unsigned int stride;
+    unsigned int generation;
     unsigned char* world_1; // призрачные ячейки включены
     unsigned char* world_2;
     unsigned char *current_world;
     unsigned char *next_world;
+    unsigned int min_living_x, min_living_y, max_living_x, max_living_y;
 } World;
 
 typedef struct {
@@ -38,6 +40,7 @@ typedef struct {
     // Параметры симуляции
     unsigned int delay_us;      // Задержка между шагами (мкс)
     double current_speed;       // Текущая скорость (итераций/сек)
+    unsigned char running;
     
     // Статистика
     time_t start_time;          // Время начала симуляции
@@ -54,24 +57,39 @@ int min(int a, int b) {
     return (a < b) ? a : b;
 }
 
+int mod(int x, int m) {
+    return (x % m + m) % m;
+}
+
+
 void init_world(World *world) {
     world->generation = 0;
-    world->world_1 = (unsigned char*) malloc(world->width * world->height * sizeof(unsigned char));
-    world->world_2 = (unsigned char*) malloc(world->width * world->height * sizeof(unsigned char));
+    world->stride = world->width + 2;
+    world->world_1 = (unsigned char*) malloc(world->stride * (world->height + 2) * sizeof(unsigned char));
+    world->world_2 = (unsigned char*) malloc(world->stride * (world->height + 2) * sizeof(unsigned char));
     world->current_world = world->world_1;
     world->next_world = world->world_2;
-    for (int i = 0; i < world->height; i++) {
-        for (int j = 0; j < world->width; j++) {
-            world->current_world[i * world->width + j] = 0;
-            // current_world[i * width + j] = (i+j) % 2;
+    world->min_living_x = 0;
+    world->min_living_y = 0;
+    world->max_living_x = world->width;
+    world->max_living_y = world->height;
+    
+    for (int i = 0; i < (world->height + 2); i++) {
+        for (int j = 0; j < (world->width + 2); j++) {
+            world->current_world[i * world->stride + j] = 0;
         }
     }
+}
+
+void init_sim(Simulation *sim) {
+    init_world(&sim->world);
+    sim->running = 1;
 }
 
 void rand_world(World *world) {
     for (int i = 1; i < world->width - 1; i++) {
         for (int j = 1; j < world->height - 1; j++) {
-            world->current_world[i * world->width + j] = rand() % TYPES;
+            world->current_world[i * world->stride + j] = rand() % TYPES;
             // current_world[i * width + j] = (i+j) % 2;
         }
     }
@@ -80,22 +98,30 @@ void rand_world(World *world) {
 void draw_world(World *world, Camera2D camera) {
 
     ClearBackground(DARKGRAY);
-    DrawRectangle(0, 0, world->width * CELL_SIZE, world->width * CELL_SIZE, RAYWHITE);
+    DrawRectangle(CELL_SIZE, CELL_SIZE, world->width * CELL_SIZE, world->height * CELL_SIZE, COLORS[0]);
     
     float camera_left   = camera.target.x - (camera.offset.x / camera.zoom);
     float camera_right  = camera.target.x + (camera.offset.x / camera.zoom);
     float camera_top    = camera.target.y - (camera.offset.y / camera.zoom);
     float camera_bottom = camera.target.y + (camera.offset.y / camera.zoom);
 
-    int render_left = max(1, camera_left);
-    int render_right = min(world->height - 1, camera_right + 1);
-    int render_top = max(1, camera_top);
-    int render_bottom = min(world->width - 1, camera_bottom + 1);
+    int render_left = max(0, (int)camera_left);
+    int render_right = min(world->width + 2, (int)camera_right + 1); // drawing ghost cells too for debug
+    int render_top = max(0, (int)camera_top);
+    int render_bottom = min(world->height + 2, (int)camera_bottom + 1);
+
     
     for (int i = render_top; i < render_bottom; i++) {
+        DrawLine(0, i*CELL_SIZE, world->width + 2, i*CELL_SIZE, GRAY);
+    }
+    for (int j = render_left; j < render_right; j++) {
+        DrawLine(j*CELL_SIZE, 0, j*CELL_SIZE, world->height + 2, GRAY);
+    }
+
+    unsigned char* current = world->current_world;
+    for (int i = render_top; i < render_bottom; i++) {
         for (int j = render_left; j < render_right; j++) {
-            unsigned char cell = world->current_world[i * world->width + j];
-            // printf(" %c", CHARS[cell]);
+            unsigned char cell = current[i * world->stride + j];
             if (cell != 0) {
                 DrawRectangle(j*CELL_SIZE, i*CELL_SIZE, CELL_SIZE, CELL_SIZE, COLORS[cell]);
             }
@@ -106,12 +132,13 @@ void draw_world(World *world, Camera2D camera) {
 
 int count_neighbors(int x, int y, char type, World *world) {
     int count = 0;
+    unsigned char* current = world->current_world;
     for (int i = y-1; i<=y+1; i++) {
         for (int j = x-1; j<=x+1; j++) {
             if (i == y && j == x) {
                 continue;
             }
-            if (world->current_world[i * world->width + j] == type) {
+            if (current[i * world->stride + j] == type) {
                 count++;
             }
         }
@@ -122,26 +149,58 @@ int count_neighbors(int x, int y, char type, World *world) {
 void wrap_edges(World* world) {
     int w = world->width;
     int h = world->height;
-    for (int x = 1; x < w - 1; x++) {
-        world->current_world[x] = world->current_world[(h - 2) * w + x];
-        world->current_world[(h - 1) * w + x] = world->current_world[1 * w + x];
+    for (int x = 1; x < w + 1; x++) {
+        world->current_world[x] = world->current_world[(h) * world->stride + x]; // setting top ghost row to real bottom row
+        world->current_world[(h + 1) * world->stride + x] = world->current_world[1 * world->stride + x]; // bottom ghost row
     }
     for (int y = 0; y < h; y++) {
-        world->current_world[y * w] = world->current_world[y * w + w - 2];
-        world->current_world[y * w + w - 1] = world->current_world[y * w + 1];
+        world->current_world[y * world->stride] = world->current_world[y * world->stride + w]; // left ghost column
+        world->current_world[y * world->stride + w + 1] = world->current_world[y * world->stride + 1]; // right ghost column
     }
 }
 
 void step_world(World *world) {
     wrap_edges(world);
-    for (int i = 1; i < world->width - 1; i++) {
-        for (int j = 1; j < world->height - 1; j++) {
+    unsigned char *current = world->current_world;
+    unsigned char *next = world->next_world;
+    // unsigned int min_y = max(1, mod(world->min_living_y - 2, world->height));
+    // unsigned int max_y = min(world->height - 1, world->max_living_y + 2);
+    // unsigned int min_x = max(1, mod(world->min_living_x - 2, world->width));
+    // unsigned int max_x = min(world->width - 1, world->max_living_x + 2);
+    unsigned int min_y = max(1, world->min_living_y - 2);
+    unsigned int max_y = min(world->height - 1, world->max_living_y + 2);
+    unsigned int min_x = max(1, world->min_living_x - 2);
+    unsigned int max_x = min(world->width - 1, world->max_living_x + 2);
+    printf("%d %d %d %d\n", min_x, max_x, min_y, max_y);
+    if (max_y >= world->height - 1) {
+        max_y = world->height - 1;
+        min_y = 1;
+    }
+    if (max_x >= world->width - 1) {
+        max_x = world->width - 1;
+        min_x = 1;
+    }
+
+    world->min_living_x = world->width;
+    world->min_living_y = world->height;
+    world->max_living_x = 0;
+    world->max_living_y = 0;
+    printf("final %d %d %d %d\n", min_x, max_x, min_y, max_y);
+    for (int i = 1; i < world->height + 1; i++) {
+        for (int j = 1; j < world->width + 1; j++) {
             int count = count_neighbors(j, i, 1, world);
-            if ((world->current_world[i * world->width + j] == 1 && (count == 2 || count == 3)) || (world->current_world[i * world->width + j] == 0 && (count == 3))) {
-                world->next_world[i * world->width + j] = 1;
+            unsigned char cell = current[i * world->stride + j];
+            if ((cell == 1 && (count == 2 || count == 3)) || (cell == 0 && (count == 3))) {
+                next[i * world->stride + j] = 1;
+                if (i < world->min_living_y) world->min_living_y = i;
+                if (i > world->max_living_y) world->max_living_y = i;
+                if (j < world->min_living_x) world->min_living_x = j;
+                if (j > world->max_living_x) world->max_living_x = j;
+
             } else {
-                world->next_world[i * world->width + j] = 0;
+                next[i * world->stride + j] = 0;
             }
+
         }
     }
     unsigned char *temp = world->current_world;
@@ -184,27 +243,38 @@ int main() {
     Vector2 lastMousePosition = {0};
 
 
-    int size = 1024;
+    int size = 32;
 
     size += 2;
-    sim.world.width = size; sim.world.height = size;
+    sim.world.width = 32; sim.world.height = 8;
     init_world(&sim.world);
-    rand_world(&sim.world);
+    // rand_world(&sim.world);
+    int x = sim.world.width / 2 - 2;
+    int y = sim.world.height / 2 - 2;
+
+    sim.world.current_world[(y + 1) * sim.world.stride + x + 2] = 1;
+    sim.world.current_world[(y + 2) * sim.world.stride + x + 3] = 1;
+    sim.world.current_world[(y + 3) * sim.world.stride + x + 1] = 1;
+    sim.world.current_world[(y + 3) * sim.world.stride + x + 2] = 1;
+    sim.world.current_world[(y + 3) * sim.world.stride + x + 3] = 1;
     state = 1;
     InitWindow(WIDTH, HEIGHT, "raylib window");
     SetTargetFPS(60);
 
     while (!WindowShouldClose()) {
-        step_simulation(&sim);
+        if (sim.running) step_simulation(&sim);
+        if (IsKeyPressed(KEY_F)) step_simulation(&sim);
 
         if (IsKeyDown(KEY_D)) camera.target.x += 10.0f / camera.zoom;
-        if (IsKeyDown(KEY_A))  camera.target.x -= 10.0f / camera.zoom;
-        if (IsKeyDown(KEY_S))  camera.target.y += 10.0f / camera.zoom;
-        if (IsKeyDown(KEY_W))    camera.target.y -= 10.0f / camera.zoom;
+        if (IsKeyDown(KEY_A)) camera.target.x -= 10.0f / camera.zoom;
+        if (IsKeyDown(KEY_S)) camera.target.y += 10.0f / camera.zoom;
+        if (IsKeyDown(KEY_W)) camera.target.y -= 10.0f / camera.zoom;
 
         if (GetMouseWheelMove() == 1) camera.zoom *= 1.1f;
         if (GetMouseWheelMove() == -1) camera.zoom /= 1.1f;
         if (camera.zoom < 0.1f) camera.zoom = 0.1f;
+
+        if (IsKeyPressed(KEY_P)) sim.running = sim.running ? 0 : 1;
 
         // Start drag
         if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE)) {

@@ -146,8 +146,8 @@ void step_world(World *world) {
         world->current_world[y * world->width + world->width - 1] = world->current_world[y * world->width + 1];
     }
     int count;
-    for (int i = 1; i < world->width - 1; i++) {
-        for (int j = 1; j < world->height - 1; j++) {
+    for (int i = 1; i < world->height - 1; i++) {
+        for (int j = 1; j < world->width - 1; j++) {
             count = get_neighbors(j, i, 1, world);
             if ((world->current_world[i * world->width + j] == 1 && (count == 2 || count == 3)) || (world->current_world[i * world->width + j] == 0 && (count == 3))) {
                 world->next_world[i * world->width + j] = 1;

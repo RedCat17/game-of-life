@@ -185,7 +185,9 @@ void free_world(World *world) {
 }
 
 void set_cell(World *world, int x, int y, unsigned char value) {
-    world->current_world[y * world->stride + x] = value;
+    if (x >= 0 && x < world->width && y >= 0 && y < world->height)
+        world->current_world[(y + 1) * world->stride + (x + 1)] = value;
+
     if (value) {
         world->min_living_x = min(world->min_living_x, x);
         world->max_living_x = max(world->max_living_x, x);
@@ -332,6 +334,7 @@ int main() {
         }
 
         if (IsKeyPressed(KEY_N)) {
+            free_world(&sim.world);
             init_world(&sim.world);
             changed = 1;
         }
@@ -377,7 +380,7 @@ int main() {
         }
 
         BeginDrawing();
-        if (changed && rendering) {
+        if (rendering) {
             // printf("rendering world...\n");`
             draw_world(&sim.world, pixelBuffer);        
             UpdateTexture(texture, pixelBuffer);
@@ -412,5 +415,7 @@ int main() {
 
     CloseWindow();
     free_world(&sim.world);
+    free(pixelBuffer);
+
     return 0;
 }

@@ -87,8 +87,9 @@ void init_sim(Simulation *sim) {
 }
 
 void rand_world(World *world) {
-    for (int i = 1; i < world->width - 1; i++) {
-        for (int j = 1; j < world->height - 1; j++) {
+    init_world(world);
+    for (int i = 1; i <= world->height; i++) {
+        for (int j = 1; j <= world->width; j++) {
             world->current_world[i * world->stride + j] = rand() % TYPES;
             // current_world[i * width + j] = (i+j) % 2;
         }
@@ -163,32 +164,15 @@ void step_world(World *world) {
     wrap_edges(world);
     unsigned char *current = world->current_world;
     unsigned char *next = world->next_world;
-    // unsigned int min_y = max(1, mod(world->min_living_y - 2, world->height));
-    // unsigned int max_y = min(world->height - 1, world->max_living_y + 2);
-    // unsigned int min_x = max(1, mod(world->min_living_x - 2, world->width));
-    // unsigned int max_x = min(world->width - 1, world->max_living_x + 2);
-    // unsigned int min_y = max(1, world->min_living_y - 2);
-    // unsigned int max_y = min(world->height, world->max_living_y + 2);
-    // unsigned int min_x = max(1, world->min_living_x - 2);
-    // unsigned int max_x = min(world->width, world->max_living_x + 2);
-    int min_y = world->min_living_y - 2;
-    int max_y = world->max_living_y + 2;
-    int min_x = world->min_living_x - 2;
-    int max_x = world->max_living_x + 2;
-    // printf("%d %d %d %d\n", min_x, max_x, min_y, max_y);
-    if (min_x < 1) {
+    int min_y = world->min_living_y - 1;
+    int max_y = world->max_living_y + 1;
+    int min_x = world->min_living_x - 1;
+    int max_x = world->max_living_x + 1;
+    if (min_x < 1 || max_x > world->width) {
         max_x = world->width;
         min_x = 1;
     }
-    if (max_x > world->width) {
-        max_x = world->width;
-        min_x = 1;
-    }
-    if (min_y < 1) {
-        max_y = world->height;
-        min_y = 1;
-    }
-    if (max_y > world->height) {
+    if (min_y < 1 || max_y > world->height) {
         max_y = world->height;
         min_y = 1;
     }
@@ -198,23 +182,22 @@ void step_world(World *world) {
     world->max_living_x = 0;
     world->max_living_y = 0;
     // printf("final %d %d %d %d\n", min_x, max_x, min_y, max_y);
-    // for (int i = 1; i < world->height + 1; i++) {
-    //     for (int j = 1; j < world->width + 1; j++) {
     for (int i = min_y; i <= max_y; i++) {
         for (int j = min_x; j <= max_x; j++) {
             int count = count_neighbors(j, i, 1, world);
             unsigned char cell = current[i * world->stride + j];
-            if ((cell == 1 && (count == 2 || count == 3)) || (cell == 0 && (count == 3))) {
-                next[i * world->stride + j] = 1;
+            if (cell) {
                 if (i < world->min_living_y) world->min_living_y = i;
                 if (i > world->max_living_y) world->max_living_y = i;
                 if (j < world->min_living_x) world->min_living_x = j;
                 if (j > world->max_living_x) world->max_living_x = j;
-
-            } else {
-                next[i * world->stride + j] = 0;
             }
-            // printf("y: %d x: %d → %d\n", i, j, next[i * world->stride + j]);
+            next[i * world->stride + j] = ((cell == 1 && (count == 2 || count == 3)) || (cell == 0 && (count == 3)));
+            // if ((cell == 1 && (count == 2 || count == 3)) || (cell == 0 && (count == 3))) {
+            //     next[i * world->stride + j] = 1;
+            // } else {
+            //     next[i * world->stride + j] = 0;
+            // }
 
         }
     }
@@ -261,7 +244,7 @@ int main() {
     int size = 32;
 
     size += 2;
-    sim.world.width = 2048; sim.world.height = 2048;
+    sim.world.width = 64; sim.world.height = 16;
     init_world(&sim.world);
     // rand_world(&sim.world);
     int x = sim.world.width / 2 - 2;
@@ -290,6 +273,9 @@ int main() {
         if (camera.zoom < 0.1f) camera.zoom = 0.1f;
 
         if (IsKeyPressed(KEY_P)) sim.running = sim.running ? 0 : 1;
+
+        if (IsKeyPressed(KEY_N)) init_world(&sim.world);
+        if (IsKeyPressed(KEY_R)) rand_world(&sim.world);
 
         // Start drag
         if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE)) {

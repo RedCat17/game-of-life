@@ -260,7 +260,15 @@ int main() {
 
     InitWindow(WIDTH, HEIGHT, "Game of Life");
     Color* pixelBuffer = malloc(sim.world.width * sim.world.height * sizeof(Color));
-    Texture2D texture = LoadTextureFromImage(GenImageColor(sim.world.width, sim.world.height, RAYWHITE));  // Placeholder
+    Image dummy = {
+        .data = pixelBuffer,
+        .width = sim.world.width,
+        .height = sim.world.height,
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
+    };
+    Texture2D texture = LoadTextureFromImage(dummy);
+
     // RenderTexture2D texture = LoadRenderTexture(sim.world.width, sim.world.height);
     // SetTargetFPS(60);
 
@@ -380,7 +388,7 @@ int main() {
             DrawTexturePro(
             texture,
             (Rectangle){ 0, 0, texture.width, texture.height }, // flip vertically
-            (Rectangle){ 0, 0, texture.width * CELL_SIZE, texture.width * CELL_SIZE },
+            (Rectangle){ 0, 0, texture.width * CELL_SIZE, texture.height * CELL_SIZE },
             (Vector2){ 0, 0 },
             0.0f,
             WHITE

@@ -2,6 +2,7 @@
 #include "world.h"
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 #include "util.h"
 
@@ -57,16 +58,28 @@ void set_cell(World *world, uint x, uint y, unsigned char value) {
 uint count_neighbors(uint x, uint y, char type, World *world) {
     uint count = 0;
     unsigned char* current = world->current_world;
-    for (uint i = y-1; i<=y+1; i++) {
-        for (uint j = x-1; j<=x+1; j++) {
-            if (i == y && j == x) {
-                continue;
-            }
-            if (current[i * world->stride + j] == type) {
-                count++;
-            }
-        }
-    }
+    uint stride = world->stride;
+    // for (uint i = y-1; i<=y+1; i++) {
+    //     for (uint j = x-1; j<=x+1; j++) {
+    //         if (i == y && j == x) {
+    //             continue;
+    //         }
+    //         count += current[i * stride + j] == type;
+    //     }
+    // }
+    
+    // loop unrolling
+    count += current[(y - 1) * world->stride + x - 1] == type;
+    count += current[(y - 1) * world->stride + x] == type;
+    count += current[(y - 1) * world->stride + x + 1] == type;
+
+    count += current[y * world->stride + x - 1] == type;
+
+    count += current[y * world->stride + x + 1] == type;
+
+    count += current[(y + 1) * world->stride + x - 1] == type;
+    count += current[(y + 1) * world->stride + x] == type;
+    count += current[(y + 1) * world->stride + x + 1] == type;
     return count;
 }
 
@@ -77,7 +90,7 @@ void wrap_edges(World* world) {
         world->current_world[x] = world->current_world[(h) * world->stride + x]; // setting top ghost row to real bottom row
         world->current_world[(h + 1) * world->stride + x] = world->current_world[1 * world->stride + x]; // bottom ghost row
     }
-    for (uint y = 0; y <= h + 1; y++) {
+    for (uint y = 0; y <= h + 1; y++) { // corners too
         world->current_world[y * world->stride] = world->current_world[y * world->stride + w]; // left ghost column
         world->current_world[y * world->stride + w + 1] = world->current_world[y * world->stride + 1]; // right ghost column
     }
@@ -91,7 +104,7 @@ void step_world(World *world) {
     uint max_y = world->max_living_y + 1;
     uint min_x = world->min_living_x - 1;
     uint max_x = world->max_living_x + 1;
-    if (min_x < 1 || max_x > world->width) {
+    if (min_x < 1 || max_x > world->width) { // если вышли за пределы поля, пересчитываем всё поле
         max_x = world->width;
         min_x = 1;
     }
@@ -109,6 +122,7 @@ void step_world(World *world) {
     for (uint i = min_y; i <= max_y; i++) {
         for (uint j = min_x; j <= max_x; j++) {
             uint count = count_neighbors(j, i, 1, world);
+            // uint count = 2;
             unsigned char cell = current[i * stride + j];
             if (cell) {
                 if (i < world->min_living_y) world->min_living_y = i;

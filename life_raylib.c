@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <string.h>
 #include <time.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -70,8 +69,8 @@ void init_world(World *world) {
     world->world_2 = (unsigned char*) malloc(world->stride * (world->height + 2) * sizeof(unsigned char));
     world->current_world = world->world_1;
     world->next_world = world->world_2;
-    world->min_living_x = 0;
-    world->min_living_y = 0;
+    world->min_living_x = 1;
+    world->min_living_y = 1;
     world->max_living_x = world->width;
     world->max_living_y = world->height;
     
@@ -94,8 +93,8 @@ void rand_world(World *world) {
             // current_world[i * width + j] = (i+j) % 2;
         }
     }
-    world->min_living_x = 0;
-    world->min_living_y = 0;
+    world->min_living_x = 1;
+    world->min_living_y = 1;
     world->max_living_x = world->width;
     world->max_living_y = world->height;
 }
@@ -150,8 +149,8 @@ void step_world(World *world) {
 
     world->min_living_x = world->width;
     world->min_living_y = world->height;
-    world->max_living_x = 0;
-    world->max_living_y = 0;
+    world->max_living_x = 1;
+    world->max_living_y = 1;
     // printf("final %d %d %d %d\n", min_x, max_x, min_y, max_y);
     unsigned int stride = world->stride;
     for (int i = min_y; i <= max_y; i++) {
@@ -215,14 +214,41 @@ void step_simulation(Simulation* sim) {
     sim->iterations_since_measure++;
 }
 
-void draw_world(World *world, Color *pixelBuffer) {
+void draw_world(World *world, Color *pixelBuffer, unsigned char full_redraw) {
 
     // DrawRectangle(CELL_SIZE, CELL_SIZE, world->width * CELL_SIZE, world->height * CELL_SIZE, COLORS[0]);
 
     unsigned char* current = world->current_world;
     unsigned int stride = world->stride;
-    for (int i = 0; i < world->height; i++) {
-        for (int j = 0; j < world->width; j++) {
+    // for (int i = 0; i < world->height; i++) {
+    //     for (int j = 0; j < world->width; j++) {
+    //         unsigned char cell = current[(i + 1) * stride + (j + 1)];
+    //         pixelBuffer[i * world->width + j] = COLORS[cell];
+
+    //     }
+    // }
+    int min_y, max_y, min_x, max_x;
+    if (full_redraw) {
+        min_y = 0;
+        max_y = world->width;
+        min_x = 0;
+        max_x = world->height;
+    } else {
+        min_y = world->min_living_y - 1;
+        max_y = world->max_living_y + 1;
+        min_x = world->min_living_x - 1;
+        max_x = world->max_living_x + 1;
+        if (min_x < 0 || max_x > world->width) {
+            max_x = world->width;
+            min_x = 0;
+        }
+        if (min_y < 0 || max_y > world->height) {
+            max_y = world->height;
+            min_y = 0;
+        }     
+    }
+    for (int i = min_y; i < max_y; i++) {
+        for (int j = min_x; j < max_x; j++) {
             unsigned char cell = current[(i + 1) * stride + (j + 1)];
             pixelBuffer[i * world->width + j] = COLORS[cell];
 
@@ -233,7 +259,7 @@ void draw_world(World *world, Color *pixelBuffer) {
 Simulation sim;
 
 int main() {
-    char text_buffer[40]; 
+    char text_buffer[128]; 
 
     bool dragging = false;
     Vector2 lastMousePosition = {0};
@@ -241,7 +267,7 @@ int main() {
 
     int size = 32;
 
-    sim.world.width = 2048; sim.world.height = 2048;
+    sim.world.width = 8; sim.world.height = 8;
     init_world(&sim.world);
     // rand_world(&sim.world);
     int x = sim.world.width / 2 - 2;
@@ -277,6 +303,7 @@ int main() {
     unsigned char changed = 1;  
     unsigned char rendering = 1;  
     unsigned char grid = 1;  
+    unsigned char full_redraw = 1;  
     while (!WindowShouldClose()) {
         float frametime = GetFrameTime();
         if (sim.running) {
@@ -309,7 +336,12 @@ int main() {
             #endif
         }
         if (IsKeyPressed(KEY_D)) {
-            rendering = rendering ? 0 : 1;
+            if (rendering) {
+                rendering = 0;
+            } else {
+                rendering = 1;
+                full_redraw = 1;  
+            }
             #ifdef DEBUG
                 if (rendering) {
                     printf("rendering\n");
@@ -382,7 +414,7 @@ int main() {
         BeginDrawing();
         if (rendering) {
             // printf("rendering world...\n");`
-            draw_world(&sim.world, pixelBuffer);        
+            draw_world(&sim.world, pixelBuffer, full_redraw);        
             UpdateTexture(texture, pixelBuffer);
         }
         BeginMode2D(camera); 
@@ -411,6 +443,7 @@ int main() {
         EndDrawing();
 
         changed = 0;
+        full_redraw = 0;
     }
 
     CloseWindow();

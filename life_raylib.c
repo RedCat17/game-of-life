@@ -216,20 +216,13 @@ void step_simulation(Simulation* sim) {
 void draw_world(World *world, Color *pixelBuffer) {
 
     // DrawRectangle(CELL_SIZE, CELL_SIZE, world->width * CELL_SIZE, world->height * CELL_SIZE, COLORS[0]);
-    Color *end = pixelBuffer + (world->width * world->height);
-    for (Color *ptr = pixelBuffer; ptr < end; ptr++) {
-        *ptr = COLORS[0];
-    }
 
     unsigned char* current = world->current_world;
     unsigned int stride = world->stride;
     for (int i = 0; i < world->height; i++) {
         for (int j = 0; j < world->width; j++) {
             unsigned char cell = current[(i + 1) * stride + (j + 1)];
-            if (cell) {
-                pixelBuffer[i * world->width + j] = COLORS[cell];
-                // DrawPixel(j, i, COLORS[cell]);
-            }
+            pixelBuffer[i * world->width + j] = COLORS[cell];
 
         }
     }

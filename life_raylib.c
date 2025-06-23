@@ -215,7 +215,6 @@ void step_simulation(Simulation* sim) {
 void draw_world(World *world) {
 
     DrawRectangle(CELL_SIZE, CELL_SIZE, world->width * CELL_SIZE, world->height * CELL_SIZE, COLORS[0]);
-    
 
     unsigned char* current = world->current_world;
     unsigned int stride = world->stride;
@@ -266,6 +265,7 @@ int main() {
 
     unsigned char changed = 1;  
     unsigned char rendering = 1;  
+    unsigned char grid = 1;  
     while (!WindowShouldClose()) {
         float frametime = GetFrameTime();
         if (sim.running) {
@@ -305,6 +305,19 @@ int main() {
                 }
                 else {
                     printf("not rendering\n");
+                }
+            #endif
+        }
+
+        if (IsKeyPressed(KEY_G)) {
+            grid = grid ? 0 : 1;
+            changed = 1;
+            #ifdef DEBUG
+                if (grid) {
+                    printf("grid on\n");
+                }
+                else {
+                    printf("grid off\n");
                 }
             #endif
         }
@@ -371,7 +384,15 @@ int main() {
             (Vector2){ 0, 0 },
             0.0f,
             WHITE
-        );
+        ); 
+        if (grid && camera.zoom > 3) {
+            for (int y = 0; y < sim.world.height; y++) {
+                DrawLine(0, y*CELL_SIZE, sim.world.width + 2, y*CELL_SIZE, GRAY);
+            }
+            for (int x = 0; x < sim.world.width; x++) {
+                DrawLine(x*CELL_SIZE, 0, x*CELL_SIZE, sim.world.height + 2, GRAY);
+            }
+        }
 
         EndMode2D(); 
         sprintf(text_buffer, "FPS: %d\nZoom: %.2f\nIterations: %ld\n%c %c", GetFPS(), camera.zoom, sim.total_iterations, sim.running ? ' ' : 'P', rendering ? 'R' : ' ');

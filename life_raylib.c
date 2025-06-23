@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -212,17 +213,22 @@ void step_simulation(Simulation* sim) {
     sim->iterations_since_measure++;
 }
 
-void draw_world(World *world) {
+void draw_world(World *world, Color *pixelBuffer) {
 
-    DrawRectangle(CELL_SIZE, CELL_SIZE, world->width * CELL_SIZE, world->height * CELL_SIZE, COLORS[0]);
+    // DrawRectangle(CELL_SIZE, CELL_SIZE, world->width * CELL_SIZE, world->height * CELL_SIZE, COLORS[0]);
+    Color *end = pixelBuffer + (world->width * world->height);
+    for (Color *ptr = pixelBuffer; ptr < end; ptr++) {
+        *ptr = COLORS[0];
+    }
 
     unsigned char* current = world->current_world;
     unsigned int stride = world->stride;
     for (int i = 0; i < world->height; i++) {
         for (int j = 0; j < world->width; j++) {
-            unsigned char cell = current[i * stride + j];
+            unsigned char cell = current[(i + 1) * stride + (j + 1)];
             if (cell) {
-                DrawPixel(j, i, COLORS[cell]);
+                pixelBuffer[i * world->width + j] = COLORS[cell];
+                // DrawPixel(j, i, COLORS[cell]);
             }
 
         }
@@ -240,7 +246,7 @@ int main() {
 
     int size = 32;
 
-    sim.world.width = 1024; sim.world.height = 1024;
+    sim.world.width = 2048; sim.world.height = 2048;
     init_world(&sim.world);
     // rand_world(&sim.world);
     int x = sim.world.width / 2 - 2;
@@ -260,7 +266,9 @@ int main() {
     camera.zoom = 1.0f;                          // Normal zoom
 
     InitWindow(WIDTH, HEIGHT, "Game of Life");
-    RenderTexture2D texture = LoadRenderTexture(sim.world.width, sim.world.height);
+    Color* pixelBuffer = malloc(sim.world.width * sim.world.height * sizeof(Color));
+    Texture2D texture = LoadTextureFromImage(GenImageColor(sim.world.width, sim.world.height, RAYWHITE));  // Placeholder
+    // RenderTexture2D texture = LoadRenderTexture(sim.world.width, sim.world.height);
     // SetTargetFPS(60);
 
     unsigned char changed = 1;  
@@ -370,17 +378,16 @@ int main() {
         BeginDrawing();
         if (changed && rendering) {
             // printf("rendering world...\n");`
-            BeginTextureMode(texture);
-                draw_world(&sim.world);        
-            EndTextureMode();
+            draw_world(&sim.world, pixelBuffer);        
+            UpdateTexture(texture, pixelBuffer);
         }
         BeginMode2D(camera); 
             ClearBackground(DARKGRAY);
             
             DrawTexturePro(
-            texture.texture,
-            (Rectangle){ 0, 0, texture.texture.width, -texture.texture.height }, // flip vertically
-            (Rectangle){ 0, 0, sim.world.width * CELL_SIZE, sim.world.height * CELL_SIZE },
+            texture,
+            (Rectangle){ 0, 0, texture.width, texture.height }, // flip vertically
+            (Rectangle){ 0, 0, texture.width * CELL_SIZE, texture.width * CELL_SIZE },
             (Vector2){ 0, 0 },
             0.0f,
             WHITE

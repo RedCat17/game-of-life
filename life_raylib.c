@@ -1,10 +1,13 @@
+// life_raylib.c
 #include <stdio.h>
-#include <time.h>
 #include <stdlib.h>
-#include <fcntl.h>
-#include <time.h>
 #include "raylib.h"
 #include "raymath.h"
+
+#include "world.h"
+#include "simulation.h"
+#include "draw.h"
+#include "util.h"
 
 
 #define WIDTH 800
@@ -21,240 +24,7 @@ const Color COLORS[] = {
 
 #define MAX_WORLD_SIZE 1024
 
-int state = 0; // 0 - menu, 1 - sim
-
-typedef struct {
-    unsigned int width, height;
-    unsigned int stride;
-    unsigned int generation;
-    unsigned char* world_1; // призрачные ячейки включены
-    unsigned char* world_2;
-    unsigned char *current_world;
-    unsigned char *next_world;
-    unsigned int min_living_x, min_living_y, max_living_x, max_living_y;
-} World;
-
-typedef struct {
-    World world;                // Состояние игрового мира
-    
-    // Параметры симуляции
-    unsigned int delay_us;      // Задержка между шагами (мкс)
-    double current_speed;       // Текущая скорость (итераций/сек)
-    unsigned char running;
-    
-    // Статистика
-    time_t start_time;          // Время начала симуляции
-    long total_iterations;      // Общее количество итераций
-    time_t last_measure_time;   // Время последнего замера скорости
-    int iterations_since_measure; // Итерации с последнего замера
-} Simulation;
-
-int max(int a, int b) {
-    return (a > b) ? a : b;
-}
-
-int min(int a, int b) {
-    return (a < b) ? a : b;
-}
-
-int mod(int x, int m) {
-    return (x % m + m) % m;
-}
-
-
-void init_world(World *world) {
-    world->generation = 0;
-    world->stride = world->width + 2;
-    world->world_1 = (unsigned char*) malloc(world->stride * (world->height + 2) * sizeof(unsigned char));
-    world->world_2 = (unsigned char*) malloc(world->stride * (world->height + 2) * sizeof(unsigned char));
-    world->current_world = world->world_1;
-    world->next_world = world->world_2;
-    world->min_living_x = 1;
-    world->min_living_y = 1;
-    world->max_living_x = world->width;
-    world->max_living_y = world->height;
-    
-    for (int i = 0; i < (world->height + 2); i++) {
-        for (int j = 0; j < (world->width + 2); j++) {
-            world->current_world[i * world->stride + j] = 0;
-        }
-    }
-}
-
-void init_sim(Simulation *sim) {
-    init_world(&sim->world);
-    sim->running = 1;
-}
-
-void rand_world(World *world) {
-    for (int i = 1; i <= world->height; i++) {
-        for (int j = 1; j <= world->width; j++) {
-            world->current_world[i * world->stride + j] = rand() % TYPES;
-            // current_world[i * width + j] = (i+j) % 2;
-        }
-    }
-    world->min_living_x = 1;
-    world->min_living_y = 1;
-    world->max_living_x = world->width;
-    world->max_living_y = world->height;
-}
-
-
-
-int count_neighbors(int x, int y, char type, World *world) {
-    int count = 0;
-    unsigned char* current = world->current_world;
-    for (int i = y-1; i<=y+1; i++) {
-        for (int j = x-1; j<=x+1; j++) {
-            if (i == y && j == x) {
-                continue;
-            }
-            if (current[i * world->stride + j] == type) {
-                count++;
-            }
-        }
-    }
-    return count;
-}
-
-void wrap_edges(World* world) {
-    int w = world->width;
-    int h = world->height;
-    for (int x = 1; x <= w; x++) {
-        world->current_world[x] = world->current_world[(h) * world->stride + x]; // setting top ghost row to real bottom row
-        world->current_world[(h + 1) * world->stride + x] = world->current_world[1 * world->stride + x]; // bottom ghost row
-    }
-    for (int y = 0; y <= h + 1; y++) {
-        world->current_world[y * world->stride] = world->current_world[y * world->stride + w]; // left ghost column
-        world->current_world[y * world->stride + w + 1] = world->current_world[y * world->stride + 1]; // right ghost column
-    }
-}
-
-void step_world(World *world) {
-    wrap_edges(world);
-    unsigned char *current = world->current_world;
-    unsigned char *next = world->next_world;
-    int min_y = world->min_living_y - 1;
-    int max_y = world->max_living_y + 1;
-    int min_x = world->min_living_x - 1;
-    int max_x = world->max_living_x + 1;
-    if (min_x < 1 || max_x > world->width) {
-        max_x = world->width;
-        min_x = 1;
-    }
-    if (min_y < 1 || max_y > world->height) {
-        max_y = world->height;
-        min_y = 1;
-    }
-
-    world->min_living_x = world->width;
-    world->min_living_y = world->height;
-    world->max_living_x = 1;
-    world->max_living_y = 1;
-    // printf("final %d %d %d %d\n", min_x, max_x, min_y, max_y);
-    unsigned int stride = world->stride;
-    for (int i = min_y; i <= max_y; i++) {
-        for (int j = min_x; j <= max_x; j++) {
-            int count = count_neighbors(j, i, 1, world);
-            unsigned char cell = current[i * stride + j];
-            if (cell) {
-                if (i < world->min_living_y) world->min_living_y = i;
-                if (i > world->max_living_y) world->max_living_y = i;
-                if (j < world->min_living_x) world->min_living_x = j;
-                if (j > world->max_living_x) world->max_living_x = j;
-            }
-            next[i * stride + j] = ((cell == 1 && (count == 2 || count == 3)) || (cell == 0 && (count == 3)));
-
-        }
-    }
-    unsigned char *temp = world->current_world;
-    world->current_world = world->next_world;
-    world->next_world = temp;
-
-    world->generation++;
-}
-
-void free_world(World *world) {
-    if (world->world_1) free(world->world_1);
-    if (world->world_2) free(world->world_2);
-    world->world_1 = NULL;
-    world->world_2 = NULL;
-    world->current_world = NULL;
-    world->next_world = NULL;
-}
-
-void set_cell(World *world, int x, int y, unsigned char value) {
-    if (x >= 0 && x < world->width && y >= 0 && y < world->height)
-        world->current_world[(y + 1) * world->stride + (x + 1)] = value;
-
-    if (value) {
-        world->min_living_x = min(world->min_living_x, x);
-        world->max_living_x = max(world->max_living_x, x);
-        world->min_living_y = min(world->min_living_y, y);
-        world->max_living_y = max(world->max_living_y, y);
-    }
-}
-
-void step_simulation(Simulation* sim) {
-    time_t current_time = time(NULL);
-    
-    // Обновление скорости
-    if (difftime(current_time, sim->last_measure_time) >= 1.0) {
-        sim->current_speed = sim->iterations_since_measure / 
-                           difftime(current_time, sim->last_measure_time);
-        sim->last_measure_time = current_time;
-        sim->iterations_since_measure = 0;
-    }
-    
-    // Основной шаг
-    step_world(&sim->world);
-    
-    // Обновление статистики
-    sim->total_iterations++;
-    sim->iterations_since_measure++;
-}
-
-void draw_world(World *world, Color *pixelBuffer, unsigned char full_redraw) {
-
-    // DrawRectangle(CELL_SIZE, CELL_SIZE, world->width * CELL_SIZE, world->height * CELL_SIZE, COLORS[0]);
-
-    unsigned char* current = world->current_world;
-    unsigned int stride = world->stride;
-    // for (int i = 0; i < world->height; i++) {
-    //     for (int j = 0; j < world->width; j++) {
-    //         unsigned char cell = current[(i + 1) * stride + (j + 1)];
-    //         pixelBuffer[i * world->width + j] = COLORS[cell];
-
-    //     }
-    // }
-    int min_y, max_y, min_x, max_x;
-    if (full_redraw) {
-        min_y = 0;
-        max_y = world->width;
-        min_x = 0;
-        max_x = world->height;
-    } else {
-        min_y = world->min_living_y - 1;
-        max_y = world->max_living_y + 1;
-        min_x = world->min_living_x - 1;
-        max_x = world->max_living_x + 1;
-        if (min_x < 0 || max_x > world->width) {
-            max_x = world->width;
-            min_x = 0;
-        }
-        if (min_y < 0 || max_y > world->height) {
-            max_y = world->height;
-            min_y = 0;
-        }     
-    }
-    for (int i = min_y; i < max_y; i++) {
-        for (int j = min_x; j < max_x; j++) {
-            unsigned char cell = current[(i + 1) * stride + (j + 1)];
-            pixelBuffer[i * world->width + j] = COLORS[cell];
-
-        }
-    }
-}
+uint state = 0; // 0 - menu, 1 - sim
 
 Simulation sim;
 
@@ -265,13 +35,13 @@ int main() {
     Vector2 lastMousePosition = {0};
 
 
-    int size = 32;
+    uint size = 32;
 
-    sim.world.width = 8; sim.world.height = 8;
+    sim.world.width = 2048; sim.world.height = 2048;
     init_world(&sim.world);
     // rand_world(&sim.world);
-    int x = sim.world.width / 2 - 2;
-    int y = sim.world.height / 2 - 2;
+    uint x = sim.world.width / 2 - 2;
+    uint y = sim.world.height / 2 - 2;
 
     sim.world.current_world[(y + 1) * sim.world.stride + x + 2] = 1;
     sim.world.current_world[(y + 2) * sim.world.stride + x + 3] = 1;
@@ -279,7 +49,6 @@ int main() {
     sim.world.current_world[(y + 3) * sim.world.stride + x + 2] = 1;
     sim.world.current_world[(y + 3) * sim.world.stride + x + 3] = 1;
     state = 1;
-
     Camera2D camera = { 0 };
     camera.target = (Vector2){ sim.world.width / 2, sim.world.height / 2 };     // What point in world space the camera looks at
     camera.offset = (Vector2){ WIDTH / 2, HEIGHT / 2 }; // Center of the screen
@@ -367,11 +136,11 @@ int main() {
 
         if (IsKeyPressed(KEY_N)) {
             free_world(&sim.world);
-            init_world(&sim.world);
+            init_sim(&sim);
             changed = 1;
         }
         if (IsKeyPressed(KEY_R)) {
-            rand_world(&sim.world);
+            rand_world(&sim.world, TYPES);
             changed = 1;
         }
 
@@ -414,7 +183,7 @@ int main() {
         BeginDrawing();
         if (rendering) {
             // printf("rendering world...\n");`
-            draw_world(&sim.world, pixelBuffer, full_redraw);        
+            draw_world(&sim.world, pixelBuffer, COLORS, full_redraw);        
             UpdateTexture(texture, pixelBuffer);
         }
         BeginMode2D(camera); 
@@ -428,12 +197,12 @@ int main() {
             0.0f,
             WHITE
         ); 
-        if (grid && camera.zoom > 3) {
-            for (int y = 0; y < sim.world.height; y++) {
-                DrawLine(0, y*CELL_SIZE, sim.world.width + 2, y*CELL_SIZE, GRAY);
+        if (grid && camera.zoom > 5) {
+            for (uint y = 0; y <= sim.world.height; y++) {
+                DrawLine(0, y*CELL_SIZE, sim.world.width, y*CELL_SIZE, GRAY);
             }
-            for (int x = 0; x < sim.world.width; x++) {
-                DrawLine(x*CELL_SIZE, 0, x*CELL_SIZE, sim.world.height + 2, GRAY);
+            for (uint x = 0; x <= sim.world.width; x++) {
+                DrawLine(x*CELL_SIZE, 0, x*CELL_SIZE, sim.world.height, GRAY);
             }
         }
 

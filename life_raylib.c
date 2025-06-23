@@ -87,51 +87,19 @@ void init_sim(Simulation *sim) {
 }
 
 void rand_world(World *world) {
-    init_world(world);
     for (int i = 1; i <= world->height; i++) {
         for (int j = 1; j <= world->width; j++) {
             world->current_world[i * world->stride + j] = rand() % TYPES;
             // current_world[i * width + j] = (i+j) % 2;
         }
     }
+    world->min_living_x = 0;
+    world->min_living_y = 0;
+    world->max_living_x = world->width;
+    world->max_living_y = world->height;
 }
 
-void draw_world(World *world, Camera2D camera) {
 
-    ClearBackground(DARKGRAY);
-    DrawRectangle(CELL_SIZE, CELL_SIZE, world->width * CELL_SIZE, world->height * CELL_SIZE, COLORS[0]);
-    
-    float camera_left   = camera.target.x - (camera.offset.x / camera.zoom);
-    float camera_right  = camera.target.x + (camera.offset.x / camera.zoom);
-    float camera_top    = camera.target.y - (camera.offset.y / camera.zoom);
-    float camera_bottom = camera.target.y + (camera.offset.y / camera.zoom);
-
-    int render_left = max(0, (int)camera_left);
-    int render_right = min(world->width + 2, (int)camera_right + 1); // drawing ghost cells too for debug
-    int render_top = max(0, (int)camera_top);
-    int render_bottom = min(world->height + 2, (int)camera_bottom + 1);
-
-    if (camera.zoom > 3) {
-        for (int i = render_top; i < render_bottom; i++) {
-            DrawLine(0, i*CELL_SIZE, world->width + 2, i*CELL_SIZE, GRAY);
-        }
-        for (int j = render_left; j < render_right; j++) {
-            DrawLine(j*CELL_SIZE, 0, j*CELL_SIZE, world->height + 2, GRAY);
-        }
-    }
-
-    unsigned char* current = world->current_world;
-    unsigned int stride = world->stride;
-    for (int i = render_top; i < render_bottom; i++) {
-        for (int j = render_left; j < render_right; j++) {
-            unsigned char cell = current[i * stride + j];
-            if (cell) {
-                DrawRectangle(j*CELL_SIZE, i*CELL_SIZE, CELL_SIZE, CELL_SIZE, COLORS[cell]);
-            }
-
-        }
-    }
-}
 
 int count_neighbors(int x, int y, char type, World *world) {
     int count = 0;
@@ -152,11 +120,11 @@ int count_neighbors(int x, int y, char type, World *world) {
 void wrap_edges(World* world) {
     int w = world->width;
     int h = world->height;
-    for (int x = 1; x < w + 1; x++) {
+    for (int x = 1; x <= w; x++) {
         world->current_world[x] = world->current_world[(h) * world->stride + x]; // setting top ghost row to real bottom row
         world->current_world[(h + 1) * world->stride + x] = world->current_world[1 * world->stride + x]; // bottom ghost row
     }
-    for (int y = 0; y < h; y++) {
+    for (int y = 0; y <= h + 1; y++) {
         world->current_world[y * world->stride] = world->current_world[y * world->stride + w]; // left ghost column
         world->current_world[y * world->stride + w + 1] = world->current_world[y * world->stride + 1]; // right ghost column
     }
@@ -206,6 +174,25 @@ void step_world(World *world) {
     world->generation++;
 }
 
+void free_world(World *world) {
+    if (world->world_1) free(world->world_1);
+    if (world->world_2) free(world->world_2);
+    world->world_1 = NULL;
+    world->world_2 = NULL;
+    world->current_world = NULL;
+    world->next_world = NULL;
+}
+
+void set_cell(World *world, int x, int y, unsigned char value) {
+    world->current_world[y * world->stride + x] = value;
+    if (value) {
+        world->min_living_x = min(world->min_living_x, x);
+        world->max_living_x = max(world->max_living_x, x);
+        world->min_living_y = min(world->min_living_y, y);
+        world->max_living_y = max(world->max_living_y, y);
+    }
+}
+
 void step_simulation(Simulation* sim) {
     time_t current_time = time(NULL);
     
@@ -225,6 +212,24 @@ void step_simulation(Simulation* sim) {
     sim->iterations_since_measure++;
 }
 
+void draw_world(World *world) {
+
+    DrawRectangle(CELL_SIZE, CELL_SIZE, world->width * CELL_SIZE, world->height * CELL_SIZE, COLORS[0]);
+    
+
+    unsigned char* current = world->current_world;
+    unsigned int stride = world->stride;
+    for (int i = 0; i < world->height; i++) {
+        for (int j = 0; j < world->width; j++) {
+            unsigned char cell = current[i * stride + j];
+            if (cell) {
+                DrawPixel(j, i, COLORS[cell]);
+            }
+
+        }
+    }
+}
+
 Simulation sim;
 
 int main() {
@@ -234,9 +239,9 @@ int main() {
     Vector2 lastMousePosition = {0};
 
 
-    int size = 2048;
+    int size = 32;
 
-    sim.world.width = size; sim.world.height = size;
+    sim.world.width = 1024; sim.world.height = 1024;
     init_world(&sim.world);
     // rand_world(&sim.world);
     int x = sim.world.width / 2 - 2;
@@ -256,25 +261,62 @@ int main() {
     camera.zoom = 1.0f;                          // Normal zoom
 
     InitWindow(WIDTH, HEIGHT, "Game of Life");
-    SetTargetFPS(60);
+    RenderTexture2D texture = LoadRenderTexture(sim.world.width, sim.world.height);
+    // SetTargetFPS(60);
 
+    unsigned char changed = 1;  
+    unsigned char rendering = 1;  
     while (!WindowShouldClose()) {
-        if (sim.running) step_simulation(&sim);
-        if (IsKeyPressed(KEY_F)) step_simulation(&sim);
+        float frametime = GetFrameTime();
+        if (sim.running) {
+            step_simulation(&sim);
+            changed = 1;
+        }
+        if (IsKeyPressed(KEY_F)) {
+            step_simulation(&sim);
+            changed = 1;
+        }
 
-        if (IsKeyDown(KEY_D)) camera.target.x += 10.0f / camera.zoom;
-        if (IsKeyDown(KEY_A)) camera.target.x -= 10.0f / camera.zoom;
-        if (IsKeyDown(KEY_S)) camera.target.y += 10.0f / camera.zoom;
-        if (IsKeyDown(KEY_W)) camera.target.y -= 10.0f / camera.zoom;
+        if (IsKeyDown(KEY_RIGHT)) camera.target.x += 600.0f / camera.zoom * frametime;
+        if (IsKeyDown(KEY_LEFT)) camera.target.x -= 600.0f / camera.zoom * frametime;
+        if (IsKeyDown(KEY_DOWN)) camera.target.y += 600.0f / camera.zoom * frametime;
+        if (IsKeyDown(KEY_UP)) camera.target.y -= 600.0f / camera.zoom * frametime;
 
         if (GetMouseWheelMove() == 1) camera.zoom *= 1.1f;
         if (GetMouseWheelMove() == -1) camera.zoom /= 1.1f;
         if (camera.zoom < 0.1f) camera.zoom = 0.1f;
 
-        if (IsKeyPressed(KEY_P)) sim.running = sim.running ? 0 : 1;
+        if (IsKeyPressed(KEY_P)) {
+            sim.running = sim.running ? 0 : 1;
+            #ifdef DEBUG
+                if (sim.running) {
+                    printf("running\n");
+                }
+                else {
+                    printf("paused\n");
+                }
+            #endif
+        }
+        if (IsKeyPressed(KEY_D)) {
+            rendering = rendering ? 0 : 1;
+            #ifdef DEBUG
+                if (rendering) {
+                    printf("rendering\n");
+                }
+                else {
+                    printf("not rendering\n");
+                }
+            #endif
+        }
 
-        if (IsKeyPressed(KEY_N)) init_world(&sim.world);
-        if (IsKeyPressed(KEY_R)) rand_world(&sim.world);
+        if (IsKeyPressed(KEY_N)) {
+            init_world(&sim.world);
+            changed = 1;
+        }
+        if (IsKeyPressed(KEY_R)) {
+            rand_world(&sim.world);
+            changed = 1;
+        }
 
         // Start drag
         if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE)) {
@@ -296,16 +338,50 @@ int main() {
             lastMousePosition = currentMouse;
         }
 
+        if(IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            Vector2 mousePos = GetMousePosition();
+            mousePos.x = (mousePos.x - camera.offset.x) / camera.zoom + camera.target.x;
+            mousePos.y = (mousePos.y - camera.offset.y) / camera.zoom + camera.target.y;
+            set_cell(&sim.world, mousePos.x, mousePos.y, 1);
+            changed = 1;
+        }
+
+        if(IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+            Vector2 mousePos = GetMousePosition();
+            mousePos.x = (mousePos.x - camera.offset.x) / camera.zoom + camera.target.x;
+            mousePos.y = (mousePos.y - camera.offset.y) / camera.zoom + camera.target.y;
+            set_cell(&sim.world, mousePos.x, mousePos.y, 0);
+            changed = 1;
+        }
+
         BeginDrawing();
+        if (changed && rendering) {
+            // printf("rendering world...\n");`
+            BeginTextureMode(texture);
+                draw_world(&sim.world);        
+            EndTextureMode();
+        }
         BeginMode2D(camera); 
-            draw_world(&sim.world, camera);        
+            ClearBackground(DARKGRAY);
+            
+            DrawTexturePro(
+            texture.texture,
+            (Rectangle){ 0, 0, texture.texture.width, -texture.texture.height }, // flip vertically
+            (Rectangle){ 0, 0, sim.world.width * CELL_SIZE, sim.world.height * CELL_SIZE },
+            (Vector2){ 0, 0 },
+            0.0f,
+            WHITE
+        );
+
         EndMode2D(); 
-        sprintf(text_buffer, "FPS: %d\nZoom: %f", GetFPS(), camera.zoom);
+        sprintf(text_buffer, "FPS: %d\nZoom: %.2f\nIterations: %ld\n%c %c", GetFPS(), camera.zoom, sim.total_iterations, sim.running ? ' ' : 'P', rendering ? 'R' : ' ');
         DrawText(text_buffer, 10, 10, 20, BLACK);
         EndDrawing();
 
+        changed = 0;
     }
 
     CloseWindow();
+    free_world(&sim.world);
     return 0;
 }

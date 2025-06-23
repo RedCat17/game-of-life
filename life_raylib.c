@@ -111,19 +111,21 @@ void draw_world(World *world, Camera2D camera) {
     int render_top = max(0, (int)camera_top);
     int render_bottom = min(world->height + 2, (int)camera_bottom + 1);
 
-    
-    for (int i = render_top; i < render_bottom; i++) {
-        DrawLine(0, i*CELL_SIZE, world->width + 2, i*CELL_SIZE, GRAY);
-    }
-    for (int j = render_left; j < render_right; j++) {
-        DrawLine(j*CELL_SIZE, 0, j*CELL_SIZE, world->height + 2, GRAY);
+    if (camera.zoom > 3) {
+        for (int i = render_top; i < render_bottom; i++) {
+            DrawLine(0, i*CELL_SIZE, world->width + 2, i*CELL_SIZE, GRAY);
+        }
+        for (int j = render_left; j < render_right; j++) {
+            DrawLine(j*CELL_SIZE, 0, j*CELL_SIZE, world->height + 2, GRAY);
+        }
     }
 
     unsigned char* current = world->current_world;
+    unsigned int stride = world->stride;
     for (int i = render_top; i < render_bottom; i++) {
         for (int j = render_left; j < render_right; j++) {
-            unsigned char cell = current[i * world->stride + j];
-            if (cell != 0) {
+            unsigned char cell = current[i * stride + j];
+            if (cell) {
                 DrawRectangle(j*CELL_SIZE, i*CELL_SIZE, CELL_SIZE, CELL_SIZE, COLORS[cell]);
             }
 
@@ -182,22 +184,18 @@ void step_world(World *world) {
     world->max_living_x = 0;
     world->max_living_y = 0;
     // printf("final %d %d %d %d\n", min_x, max_x, min_y, max_y);
+    unsigned int stride = world->stride;
     for (int i = min_y; i <= max_y; i++) {
         for (int j = min_x; j <= max_x; j++) {
             int count = count_neighbors(j, i, 1, world);
-            unsigned char cell = current[i * world->stride + j];
+            unsigned char cell = current[i * stride + j];
             if (cell) {
                 if (i < world->min_living_y) world->min_living_y = i;
                 if (i > world->max_living_y) world->max_living_y = i;
                 if (j < world->min_living_x) world->min_living_x = j;
                 if (j > world->max_living_x) world->max_living_x = j;
             }
-            next[i * world->stride + j] = ((cell == 1 && (count == 2 || count == 3)) || (cell == 0 && (count == 3)));
-            // if ((cell == 1 && (count == 2 || count == 3)) || (cell == 0 && (count == 3))) {
-            //     next[i * world->stride + j] = 1;
-            // } else {
-            //     next[i * world->stride + j] = 0;
-            // }
+            next[i * stride + j] = ((cell == 1 && (count == 2 || count == 3)) || (cell == 0 && (count == 3)));
 
         }
     }
@@ -231,20 +229,14 @@ Simulation sim;
 
 int main() {
     char text_buffer[40]; 
-    Camera2D camera = { 0 };
-    camera.target = (Vector2){ 0.0f, 0.0f };     // What point in world space the camera looks at
-    camera.offset = (Vector2){ WIDTH / 2, HEIGHT / 2 }; // Center of the screen
-    camera.rotation = 0.0f;                      // No rotation
-    camera.zoom = 1.0f;                          // Normal zoom
 
     bool dragging = false;
     Vector2 lastMousePosition = {0};
 
 
-    int size = 32;
+    int size = 2048;
 
-    size += 2;
-    sim.world.width = 64; sim.world.height = 16;
+    sim.world.width = size; sim.world.height = size;
     init_world(&sim.world);
     // rand_world(&sim.world);
     int x = sim.world.width / 2 - 2;
@@ -256,7 +248,14 @@ int main() {
     sim.world.current_world[(y + 3) * sim.world.stride + x + 2] = 1;
     sim.world.current_world[(y + 3) * sim.world.stride + x + 3] = 1;
     state = 1;
-    InitWindow(WIDTH, HEIGHT, "raylib window");
+
+    Camera2D camera = { 0 };
+    camera.target = (Vector2){ sim.world.width / 2, sim.world.height / 2 };     // What point in world space the camera looks at
+    camera.offset = (Vector2){ WIDTH / 2, HEIGHT / 2 }; // Center of the screen
+    camera.rotation = 0.0f;                      // No rotation
+    camera.zoom = 1.0f;                          // Normal zoom
+
+    InitWindow(WIDTH, HEIGHT, "Game of Life");
     SetTargetFPS(60);
 
     while (!WindowShouldClose()) {
@@ -301,7 +300,7 @@ int main() {
         BeginMode2D(camera); 
             draw_world(&sim.world, camera);        
         EndMode2D(); 
-        sprintf(text_buffer, "FPS: %d", GetFPS());
+        sprintf(text_buffer, "FPS: %d\nZoom: %f", GetFPS(), camera.zoom);
         DrawText(text_buffer, 10, 10, 20, BLACK);
         EndDrawing();
 

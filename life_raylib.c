@@ -240,7 +240,7 @@ int main() {
 
     int size = 32;
 
-    sim.world.width = 1024; sim.world.height = 1024;
+    sim.world.width = 2048; sim.world.height = 2048;
     init_world(&sim.world);
     // rand_world(&sim.world);
     int x = sim.world.width / 2 - 2;
